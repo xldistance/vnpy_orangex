@@ -264,9 +264,9 @@ class RestClient(object):
                 url,
                 headers=request.headers,
                 params=request.params,
-                data=request.data if "jsonrpc" not in request.data else None, # jsonrpc不传data参数
+                data=request.data if request.data and "jsonrpc" not in request.data else None, # jsonrpc不传data参数
                 proxies=self.proxies,
-                json = request.data if "jsonrpc" in request.data else None      # 兼容 jsonrpc 
+                json = request.data if request.data and "jsonrpc" in request.data else None      # 兼容 jsonrpc 
             )
             request.response = response
             status_code = response.status_code
