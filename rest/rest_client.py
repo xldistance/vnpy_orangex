@@ -334,8 +334,8 @@ class RestClient(object):
                 url,
                 headers=request.headers,
                 params=request.params,
-                data=request.data if "jsonrpc" not in request.data else None,
-                json = request.data if "jsonrpc" in request.data else None,
+                data=request.data if request.data and "jsonrpc" not in request.data else None,
+                json = request.data if request.data and "jsonrpc" in request.data else None,
                 proxies=self.proxies,
             )
             return response
