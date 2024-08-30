@@ -98,8 +98,6 @@ TIME_IN_FORCE_VT2ORANGEX = {
 class Security(Enum):
     NONE: int = 0
     SIGNED: int = 1
-# 合约数据缓存
-CONTRACT_DATA = {}
 # ----------------------------------------------------------------------------------------------------
 class OrangexGateway(BaseGateway):
     """vn.py用于对接ORANGEX的交易接口"""
@@ -517,7 +515,7 @@ class OrangexRestApi(RestClient):
     def cancel_order(self, req: CancelRequest) -> None:
         """
         委托撤单
-        必须用api生成的订单编号撤单
+        必须用交易所订单编号撤单
         """
         gateway_id = self.orderid_map[req.orderid]
         if not gateway_id:
@@ -826,7 +824,15 @@ class OrangexWebsocketApi(WebsocketClient):
             return
         self.ping_count = 0
         self.send_topics("/public/ping",{})
-        self.token_count
+        # 定时清理委托单id映射
+        orderid_map = self.gateway.rest_api.orderid_map
+        if len(orderid_map) < 100:
+            return
+        orderid = list(orderid_map)[0]
+        order = self.gateway.get_order(orderid)
+        if not order or not order.is_active():
+            if orderid in orderid_map:
+                orderid_map.pop(orderid)
     # ----------------------------------------------------------------------------------------------------
     def update_token(self,event):
         """
@@ -1092,6 +1098,8 @@ class OrangexWebsocketApi(WebsocketClient):
             if raw["reduce_only"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
+            self.gateway.rest_api.orderid_map[orderid] = systemid
+
             if order.traded:
                 self.trade_id += 1
                 trade: TradeData = TradeData(
@@ -1106,11 +1114,3 @@ class OrangexWebsocketApi(WebsocketClient):
                     gateway_name=self.gateway_name,
                 )
                 self.gateway.on_trade(trade)
-
-            # orderid_map删除非活动委托单
-            orderid_map = self.gateway.rest_api.orderid_map
-            if not order.is_active():
-                if orderid in orderid_map:
-                    orderid_map.pop(orderid)
-            else:
-                orderid_map[orderid] = systemid
