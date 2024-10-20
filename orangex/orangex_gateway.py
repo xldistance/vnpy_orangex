@@ -517,10 +517,10 @@ class OrangexRestApi(RestClient):
         委托撤单
         必须用交易所订单编号撤单
         """
-        gateway_id = self.orderid_map[req.orderid]
-        if not gateway_id:
-            gateway_id = req.orderid
-        data: dict = {"security": Security.SIGNED,"order_id":gateway_id}
+        gatewayid = self.orderid_map[req.orderid]
+        if not gatewayid:
+            gatewayid = req.orderid
+        data: dict = {"security": Security.SIGNED,"order_id":gatewayid}
         path: str = "/private/cancel"
 
         order: OrderData = self.gateway.get_order(req.orderid)
@@ -611,11 +611,11 @@ class OrangexRestApi(RestClient):
         data = data["result"]
         if not data:
             return
+        orderid_reverse = {v:k for k,v in self.orderid_map.items()}
         for raw in data:
-            orderid = raw["custom_order_id"]
-            systemid = raw["order_id"]
+            gatewayid = raw["order_id"]
             order: OrderData = OrderData(
-                orderid=orderid if orderid not in ["-",""] else systemid,
+                orderid=orderid_reverse.get(gatewayid,gatewayid),
                 symbol=raw["instrument_name"],
                 exchange=Exchange.ORANGEX,
                 price=float(raw["price"]),
@@ -634,7 +634,7 @@ class OrangexRestApi(RestClient):
             # 调整市价单成交价格
             if order.price < 0:
                 order.price = float(raw["average_price"])
-            self.orderid_map[orderid] = systemid
+
             if raw["reduce_only"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
@@ -669,10 +669,9 @@ class OrangexRestApi(RestClient):
             self.gateway.on_order(order)
             self.gateway.write_log(f"合约：{order.vt_symbol}委托失败，状态码：{msg['code']}，信息：{msg}")
             return
-        data = data["result"]
-        if "order" in data:
-            id_map = data["order"]
-            self.orderid_map[id_map["custom_order_id"]] = id_map["order_id"]
+        order_data = data.get("result", {}).get("order")
+        if order_data:
+            self.orderid_map[order_data["custom_order_id"]] = order_data["order_id"]
     # ----------------------------------------------------------------------------------------------------
     def on_send_order_error(self, exception_type: type, exception_value: Exception, tb, request: Request) -> None:
         """
@@ -1038,6 +1037,9 @@ class OrangexWebsocketApi(WebsocketClient):
         """
         positions = data["positions"]
         orders = data["orders"]
+        trades = data["trades"]
+        orderid_map = self.gateway.rest_api.orderid_map
+        orderid_reverse = {v: k for k, v in orderid_map.items()}
         for raw in positions:
             direction = raw["direction"]
             if direction == "zero":
@@ -1073,10 +1075,9 @@ class OrangexWebsocketApi(WebsocketClient):
             self.gateway.on_position(position_2)
 
         for raw in orders:
-            orderid = raw["custom_order_id"]
-            systemid = raw["order_id"]
+            gatewayid = raw["order_id"]
             order: OrderData = OrderData(
-                orderid=orderid if orderid not in ["-",""] else systemid,
+                orderid=orderid_reverse.get(gatewayid,gatewayid),
                 symbol=raw["instrument_name"],
                 exchange=Exchange.ORANGEX,
                 price=float(raw["price"]),
@@ -1098,19 +1099,20 @@ class OrangexWebsocketApi(WebsocketClient):
             if raw["reduce_only"]:
                 order.offset = Offset.CLOSE
             self.gateway.on_order(order)
-            self.gateway.rest_api.orderid_map[orderid] = systemid
 
-            if order.traded:
-                self.trade_id += 1
-                trade: TradeData = TradeData(
-                    symbol=order.symbol,
-                    exchange=Exchange.ORANGEX,
-                    orderid=order.orderid,
-                    tradeid=self.trade_id,
-                    direction=order.direction,
-                    price=order.price,
-                    volume=order.traded,
-                    datetime=get_local_datetime(raw["creation_timestamp"]),
-                    gateway_name=self.gateway_name,
-                )
-                self.gateway.on_trade(trade)
+        
+        for raw in trades:
+            self.trade_id += 1
+            gatewayid = raw["order_id"]
+            trade: TradeData = TradeData(
+                symbol=raw["instrument_name"],
+                exchange=Exchange.ORANGEX,
+                orderid=orderid_reverse.get(gatewayid,gatewayid),
+                tradeid=self.trade_id,
+                direction=DIRECTION_ORANGEX2VT[raw["direction"]],
+                price=float(raw["price"]),
+                volume=float(raw["amount"]),
+                datetime=get_local_datetime(raw["timestamp"]),
+                gateway_name=self.gateway_name,
+            )
+            self.gateway.on_trade(trade)
